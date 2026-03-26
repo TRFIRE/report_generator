@@ -1,0 +1,587 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { FileText, ChevronRight, Camera, X, ArrowLeft, Download, CheckCircle, AlertCircle, Settings, Upload, Share2 } from 'lucide-react';
+
+export default function App() {
+  const [step, setStep] = useState(1);
+  const [pdfReady, setPdfReady] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errors, setErrors] = useState({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  
+  const fileInputRef = useRef(null);
+
+  // Estado para configurações salvas localmente (Logos e Nome da Unidade)
+  const [settings, setSettings] = useState({ leftLogo: '', rightLogo: '', unitName: 'PARQUE LOGÍSTICO AERO GRU I' });
+
+  const [formData, setFormData] = useState({
+    responsavel: '',
+    matricula: '',
+    local: '',
+    type: '',
+    date: new Date().toISOString().split('T')[0],
+    time: new Date().toTimeString().split(' ')[0].substring(0, 5),
+    description: '',
+    action: '',
+    observations: ''
+  });
+
+  const [images, setImages] = useState([]);
+
+  const reportTypes = [
+    "CAPTURA DE ANIMAL PEÇONHENTO",
+    "ATENDIMENTO DE PRIMEIROS SOCORROS",
+    "ACOMPANHAMENTO DE ATIVIDADES",
+    "PRINCÍPIO DE INCÊNDIO",
+    "DANOS MATERIAIS"
+  ];
+
+  // Injetar jsPDF e carregar logos salvos
+  useEffect(() => {
+    if (!window.jspdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      script.async = true;
+      script.onload = () => setPdfReady(true);
+      document.body.appendChild(script);
+    } else {
+      setPdfReady(true);
+    }
+
+    // Carregar configurações salvas na memória do celular
+    const savedSettings = localStorage.getItem('reportSettings');
+    if (savedSettings) {
+      setSettings(JSON.parse(savedSettings));
+    }
+  }, []);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+  };
+
+  const handleSettingChange = (field, value) => {
+    const newSettings = { ...settings, [field]: value };
+    setSettings(newSettings);
+    localStorage.setItem('reportSettings', JSON.stringify(newSettings));
+  };
+
+  const handleLogoUpload = (e, side) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        handleSettingChange(side, event.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const validateStep1 = () => {
+    const newErrors = {};
+    if (!formData.responsavel) newErrors.responsavel = 'Obrigatório';
+    if (!formData.matricula) newErrors.matricula = 'Obrigatório';
+    if (!formData.local) newErrors.local = 'Obrigatório';
+    if (!formData.type) newErrors.type = 'Selecione o tipo';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const validateStep2 = () => {
+    const newErrors = {};
+    if (!formData.date) newErrors.date = 'Data é obrigatória';
+    if (!formData.time) newErrors.time = 'Horário é obrigatório';
+    if (!formData.description) newErrors.description = 'Descrição é obrigatória';
+    if (!formData.action) newErrors.action = 'Ação imediata é obrigatória';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleNextStep = () => {
+    if (validateStep1()) setStep(2);
+  };
+
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files);
+    if (images.length + files.length > 3) {
+      alert("Você pode anexar no máximo 3 imagens.");
+      return;
+    }
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          const scaleSize = MAX_WIDTH / img.width;
+          canvas.width = MAX_WIDTH;
+          canvas.height = img.height * scaleSize;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          setImages(prev => [...prev, canvas.toDataURL('image/jpeg', 0.8)]);
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeImage = (indexToRemove) => {
+    setImages(prev => prev.filter((_, index) => index !== indexToRemove));
+  };
+
+  const generatePDF = async (actionType = 'save') => {
+    if (!validateStep2()) return;
+    if (!window.jspdf) return alert("Aguarde a biblioteca PDF carregar.");
+
+    setIsGenerating(true);
+
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      // Configurações de página
+      const m = 10; // Margem
+      const w = 190; // Largura útil
+      let y = m;
+
+      doc.setDrawColor(0); // Bordas pretas
+      doc.setLineWidth(0.3);
+
+      // --- CABEÇALHO ---
+      doc.rect(m, y, w, 25);
+      doc.line(m + 60, y, m + 60, y + 25);
+      doc.line(m + 130, y, m + 130, y + 25);
+
+      if (settings.leftLogo) doc.addImage(settings.leftLogo, 'PNG', m + 2, y + 2, 56, 21, undefined, 'FAST');
+      else doc.text("Logo 1", m + 25, y + 14);
+
+      if (settings.rightLogo) doc.addImage(settings.rightLogo, 'PNG', m + 132, y + 2, 56, 21, undefined, 'FAST');
+      else doc.text("Logo 2", m + 155, y + 14);
+
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("RELATÓRIO BOMBEIRO CIVIL", 105, y + 10, { align: "center" });
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text((settings.unitName || "").toUpperCase(), 105, y + 18, { align: "center" });
+      
+      y += 25;
+
+      // --- TABELA DE INFORMAÇÕES (METADADOS) ---
+      const drawCell = (x, cellY, cellW, cellH, title, text) => {
+        doc.rect(x, cellY, cellW, cellH);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.text(title, x + 2, cellY + 4);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        if(text) doc.text(String(text).toUpperCase(), x + 2, cellY + 9);
+      };
+
+      drawCell(m, y, 95, 12, "RESPONSÁVEL / BOMBEIRO CIVIL", formData.responsavel);
+      drawCell(m + 95, y, 95, 12, "MATRÍCULA", formData.matricula);
+      y += 12;
+
+      drawCell(m, y, w, 12, "ÁREA/LOCAL", formData.local);
+      y += 12;
+
+      const dateEmissao = new Date().toLocaleDateString('pt-BR');
+      const timeEmissao = new Date().toLocaleTimeString('pt-BR').substring(0, 5);
+      const dataOcorrencia = formData.date.split('-').reverse().join('/');
+
+      drawCell(m, y, 47.5, 12, "DATA DE EMISSÃO", dateEmissao);
+      drawCell(m + 47.5, y, 47.5, 12, "HORÁRIO EMISSÃO", timeEmissao);
+      drawCell(m + 95, y, 47.5, 12, "DATA DA OCORRÊNCIA", dataOcorrencia);
+      drawCell(m + 142.5, y, 47.5, 12, "HORÁRIO DA OCORRÊNCIA", formData.time);
+      y += 12;
+
+      drawCell(m, y, w, 12, "SELECIONAR TIPO DE REGISTRO", formData.type);
+      y += 16;
+
+      // --- SEÇÕES DE TEXTO ---
+      const drawTextSection = (title, content) => {
+        if (!content) return;
+
+        // Fundo cinza para o título da seção
+        doc.setFillColor(230, 230, 230);
+        doc.rect(m, y, w, 8, 'FD');
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text(title, 105, y + 5.5, { align: "center" });
+        y += 8;
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const lines = doc.splitTextToSize(content, w - 4);
+        const boxHeight = (lines.length * 5) + 6;
+
+        // Verifica quebra de página
+        if (y + boxHeight > 280) {
+          doc.addPage();
+          y = m;
+        }
+
+        doc.rect(m, y, w, boxHeight);
+        doc.text(lines, m + 2, y + 6);
+        y += boxHeight + 4;
+      };
+
+      // Agora os campos descritivos mantêm o formato exato digitado
+      drawTextSection("DESCRIÇÃO DA OCORRÊNCIA", formData.description || "");
+      drawTextSection("AÇÃO IMEDIATA / TRATATIVA", formData.action || "");
+      drawTextSection("OBSERVAÇÕES", formData.observations || "");
+
+      // --- IMAGENS ---
+      if (images.length > 0) {
+        if (y > 220) { doc.addPage(); y = m; }
+
+        doc.setFillColor(230, 230, 230);
+        doc.rect(m, y, w, 8, 'FD');
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text("REGISTRO FOTOGRÁFICO", 105, y + 5.5, { align: "center" });
+        y += 10;
+
+        let imgX = m + 5;
+        let imgY = y;
+        let maxRowHeight = 0;
+
+        images.forEach((imgData, idx) => {
+          const props = doc.getImageProperties(imgData);
+          const imgW = 85;
+          const imgH = (props.height * imgW) / props.width;
+
+          // Se for a terceira imagem, joga para a linha de baixo, centralizada
+          if (idx === 2) {
+            imgX = 105 - (imgW / 2);
+            imgY += maxRowHeight + 5;
+          }
+
+          if (imgY + imgH > 270) {
+            doc.addPage();
+            imgY = m;
+          }
+
+          doc.addImage(imgData, 'JPEG', imgX, imgY, imgW, imgH);
+          doc.rect(imgX, imgY, imgW, imgH); // Borda na imagem
+          
+          maxRowHeight = Math.max(maxRowHeight, imgH);
+
+          if (idx === 0) imgX += imgW + 10; // Avança X para a segunda foto
+        });
+
+        y = imgY + maxRowHeight + 15;
+      }
+
+      // --- ASSINATURA ---
+      if (y > 260) { doc.addPage(); y = m; }
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.text(formData.responsavel.toUpperCase(), 105, y + 10, { align: "center" });
+      
+      const extensoData = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      doc.setFont("helvetica", "normal");
+      doc.text(extensoData.toUpperCase(), 105, y + 16, { align: "center" });
+
+      // Salvar ou Compartilhar PDF
+      const fileName = `${formData.type.replace(/\s+/g, '_')}_${dataOcorrencia.replace(/\//g, '-')}_${formData.responsavel.split(' ')[0]}.pdf`;
+      
+      if (actionType === 'share') {
+        const blob = doc.output('blob');
+        const file = new File([blob], fileName, { type: 'application/pdf' });
+        
+        // Verifica se o aparelho suporta compartilhamento de arquivos nativo
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: 'Relatório de Ocorrência',
+              text: 'Segue em anexo o relatório de ocorrência.'
+            });
+            setSuccessMessage("Opções de compartilhamento abertas!");
+          } catch (err) {
+            console.log("Compartilhamento cancelado ou falhou", err);
+          }
+        } else {
+          alert("Seu navegador/aparelho não suporta compartilhamento direto. O arquivo será salvo no aparelho.");
+          doc.save(fileName);
+          setSuccessMessage("Relatório salvo no aparelho!");
+        }
+      } else {
+        doc.save(fileName);
+        setSuccessMessage("Relatório salvo no aparelho com sucesso!");
+      }
+      
+      setTimeout(() => setSuccessMessage(''), 4000);
+      
+    } catch (err) {
+      console.error(err);
+      alert("Ocorreu um erro ao gerar o PDF.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col font-sans sm:justify-center sm:py-8">
+      <div className="flex-1 w-full sm:max-w-md mx-auto bg-white sm:rounded-2xl sm:shadow-2xl overflow-hidden flex flex-col relative">
+        
+        {/* Header App */}
+        <div className="bg-[#002f5b] px-6 py-4 shadow-md z-10 sticky top-0 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-white">
+            {step === 2 && (
+              <button onClick={() => setStep(1)} className="mr-2 p-1 rounded-full hover:bg-white/20 transition-colors">
+                <ArrowLeft size={22} />
+              </button>
+            )}
+            <FileText size={24} className="text-yellow-400" />
+            <h1 className="text-xl font-bold tracking-wide">Relatório Digital</h1>
+          </div>
+          <button 
+            onClick={() => setSettingsOpen(true)}
+            className="text-white p-2 rounded-full hover:bg-white/20 transition"
+          >
+            <Settings size={22} />
+          </button>
+        </div>
+
+        {/* Modal de Configurações (Logos) */}
+        {settingsOpen && (
+          <div className="absolute inset-0 bg-black/60 z-50 flex flex-col justify-end">
+            <div className="bg-white rounded-t-2xl p-6 h-[85%] flex flex-col animate-in slide-in-from-bottom-full">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-gray-800">Configurações</h2>
+                <button onClick={() => setSettingsOpen(false)} className="p-2 bg-gray-100 rounded-full text-gray-600">
+                  <X size={20} />
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mb-6">
+                Defina o nome da sua unidade e faça o upload dos logotipos do cabeçalho.
+              </p>
+
+              <div className="space-y-6 overflow-y-auto pb-4">
+                {/* Nome da Unidade */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nome da Unidade / Contrato</label>
+                  <input 
+                    type="text" 
+                    value={settings.unitName} 
+                    onChange={(e) => handleSettingChange('unitName', e.target.value)} 
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none uppercase bg-gray-50" 
+                    placeholder="Ex: PARQUE LOGÍSTICO AERO GRU I"
+                  />
+                </div>
+
+                {/* Logo Esquerda */}
+                <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center relative hover:bg-gray-50 transition cursor-pointer">
+                  <input type="file" accept="image/png, image/jpeg" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e) => handleLogoUpload(e, 'leftLogo')} />
+                  {settings.leftLogo ? (
+                    <img src={settings.leftLogo} alt="Logo Esq" className="h-16 mx-auto object-contain" />
+                  ) : (
+                    <div className="flex flex-col items-center text-blue-600">
+                      <Upload size={24} className="mb-2" />
+                      <span className="text-sm font-semibold">Logo Esquerdo (Ex: Vilella)</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Logo Direita */}
+                <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center relative hover:bg-gray-50 transition cursor-pointer">
+                  <input type="file" accept="image/png, image/jpeg" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e) => handleLogoUpload(e, 'rightLogo')} />
+                  {settings.rightLogo ? (
+                    <img src={settings.rightLogo} alt="Logo Dir" className="h-16 mx-auto object-contain" />
+                  ) : (
+                    <div className="flex flex-col items-center text-blue-600">
+                      <Upload size={24} className="mb-2" />
+                      <span className="text-sm font-semibold">Logo Direito (Ex: C&W)</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button onClick={() => setSettingsOpen(false)} className="mt-auto w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold text-lg">
+                Concluir
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Notificação de Sucesso */}
+        {successMessage && (
+          <div className="absolute top-16 left-4 right-4 bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-40 animate-bounce">
+            <CheckCircle className="text-green-600" size={20} />
+            <p className="font-medium text-sm">{successMessage}</p>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col">
+          
+          {/* TELA 1 - IDENTIFICAÇÃO */}
+          {step === 1 && (
+            <div className="flex-1 flex flex-col animate-in fade-in duration-300">
+              <h2 className="text-xl font-bold text-gray-800 mb-6 border-b pb-2">Identificação</h2>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Responsável (Seu Nome)</label>
+                  <input type="text" name="responsavel" value={formData.responsavel} onChange={handleInputChange} className={`w-full border ${errors.responsavel ? 'border-red-500' : 'border-gray-300'} rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none uppercase bg-gray-50`} placeholder="Ex: THAWILLYS ROCHA"/>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Matrícula</label>
+                    <input type="text" name="matricula" value={formData.matricula} onChange={handleInputChange} className={`w-full border ${errors.matricula ? 'border-red-500' : 'border-gray-300'} rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none uppercase bg-gray-50`} placeholder="Ex: VLL-0003"/>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Área/Local</label>
+                    <input type="text" name="local" value={formData.local} onChange={handleInputChange} className={`w-full border ${errors.local ? 'border-red-500' : 'border-gray-300'} rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none uppercase bg-gray-50`} placeholder="Ex: G-200 (LATAM)"/>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Tipo de Registro</label>
+                  <select name="type" value={formData.type} onChange={handleInputChange} className={`w-full appearance-none bg-white border ${errors.type ? 'border-red-500' : 'border-gray-300'} rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium`}>
+                    <option value="" disabled>Selecione a Ocorrência...</option>
+                    {reportTypes.map(type => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button onClick={handleNextStep} className="w-full bg-[#002f5b] text-white rounded-xl py-4 font-bold text-lg shadow-lg hover:bg-blue-900 transition-all flex items-center justify-center gap-2 mt-8">
+                  Continuar <ChevronRight size={20} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TELA 2 - DETALHES E FOTOS */}
+          {step === 2 && (
+            <div className="flex flex-col gap-5 animate-in slide-in-from-right-4 duration-300 pb-20">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Data do Fato</label>
+                  <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 bg-gray-50" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Horário do Fato</label>
+                  <input type="time" name="time" value={formData.time} onChange={handleInputChange} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 bg-gray-50" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição da Ocorrência</label>
+                <textarea 
+                  name="description" 
+                  value={formData.description} 
+                  onChange={handleInputChange} 
+                  rows="4" 
+                  spellCheck={true}
+                  lang="pt-BR"
+                  className={`w-full border ${errors.description ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm`} 
+                  placeholder="Descreva os detalhes..."
+                ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Ação Imediata Tomada</label>
+                <textarea 
+                  name="action" 
+                  value={formData.action} 
+                  onChange={handleInputChange} 
+                  rows="2" 
+                  spellCheck={true}
+                  lang="pt-BR"
+                  className={`w-full border ${errors.action ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm`} 
+                  placeholder="O que foi feito?"
+                ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Observações (Opcional)</label>
+                <textarea 
+                  name="observations" 
+                  value={formData.observations} 
+                  onChange={handleInputChange} 
+                  rows="2" 
+                  spellCheck={true}
+                  lang="pt-BR"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm"
+                ></textarea>
+              </div>
+
+              {/* Registro Fotográfico */}
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mt-2">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm font-bold text-gray-800">
+                    Fotos <span className="text-gray-500 font-normal">({images.length}/3)</span>
+                  </label>
+                  {images.length < 3 && (
+                    <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 text-blue-700 bg-blue-100 px-3 py-1.5 rounded-md text-sm font-bold hover:bg-blue-200">
+                      <Camera size={16} /> Anexar
+                    </button>
+                  )}
+                </div>
+                
+                <input type="file" accept="image/*" multiple className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+
+                {images.length === 0 ? (
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 flex flex-col items-center justify-center text-gray-400">
+                    <Camera size={28} className="mb-2 opacity-50" />
+                    <p className="text-xs text-center font-medium">Nenhuma foto anexada.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {images.map((img, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 shadow-sm group">
+                        <img src={img} alt="Preview" className="w-full h-full object-cover" />
+                        <button onClick={() => removeImage(idx)} className="absolute top-1 right-1 bg-white/90 text-red-500 p-1 rounded-full shadow-sm hover:bg-red-50 hover:text-red-600">
+                          <X size={14} strokeWidth={3} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* FAB (Botões de Salvar e Compartilhar) */}
+        {step === 2 && (
+          <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur-md border-t border-gray-100 flex gap-3 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)]">
+            <button
+              onClick={() => generatePDF('save')}
+              disabled={!pdfReady || isGenerating}
+              className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all ${
+                isGenerating || !pdfReady ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#002f5b] hover:bg-blue-900 active:scale-[0.98]'
+              }`}
+            >
+              <Download size={22} className="mb-1" />
+              Salvar
+            </button>
+            <button
+              onClick={() => generatePDF('share')}
+              disabled={!pdfReady || isGenerating}
+              className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all ${
+                isGenerating || !pdfReady ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 active:scale-[0.98]'
+              }`}
+            >
+              <Share2 size={22} className="mb-1" />
+              Compartilhar
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
