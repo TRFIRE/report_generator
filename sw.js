@@ -1,14 +1,16 @@
-self.addEventListener('install', (e) => {
-  e.waitUntil(self.skipWaiting());
-});
-
-self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('fetch', (e) => {
-  // Uma configuração simples para manter o app online
-  e.respondWith(
-    fetch(e.request).catch(() => new Response('Você está offline, mas o app continua funcionando na aba que já estava aberta!'))
-  );
-});
+{
+  "name": "Relatório Bombeiro Civil",
+  "short_name": "Relatórios",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#002f5b",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/792/792107.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
