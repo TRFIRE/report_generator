@@ -71,6 +71,11 @@
       const [swStatus, setSwStatus] = useState('A verificar ligação...');
       
       const fileInputRef = useRef(null);
+      
+      // Estados para Assinatura
+      const sigCanvasRef = useRef(null);
+      const [isDrawing, setIsDrawing] = useState(false);
+      const [hasSignature, setHasSignature] = useState(false);
 
       const [settings, setSettings] = useState({ leftLogo: '', rightLogo: '', unitName: 'PARQUE LOGÍSTICO AERO GRU I' });
 
@@ -127,6 +132,17 @@
         return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       }, []);
 
+      // Configurar o Canvas de Assinatura quando entrar na Tela 2
+      useEffect(() => {
+        if (step === 2 && sigCanvasRef.current) {
+          const ctx = sigCanvasRef.current.getContext('2d');
+          ctx.lineWidth = 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.strokeStyle = '#002f5b'; // Cor da caneta (Azul Escuro)
+        }
+      }, [step]);
+
       const handleInstallClick = async () => {
         if (!installPrompt) return;
         installPrompt.prompt();
@@ -158,6 +174,59 @@
             handleSettingChange(side, event.target.result);
           };
           reader.readAsDataURL(file);
+        }
+      };
+
+      // Funções do Canvas de Assinatura
+      const getCoordinates = (canvas, event) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        let clientX = event.clientX;
+        let clientY = event.clientY;
+
+        if (event.touches && event.touches.length > 0) {
+          clientX = event.touches[0].clientX;
+          clientY = event.touches[0].clientY;
+        }
+
+        return {
+          x: (clientX - rect.left) * scaleX,
+          y: (clientY - rect.top) * scaleY
+        };
+      };
+
+      const startDrawing = (e) => {
+        setIsDrawing(true);
+        const { x, y } = getCoordinates(sigCanvasRef.current, e);
+        const ctx = sigCanvasRef.current.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      };
+
+      const draw = (e) => {
+        if (!isDrawing) return;
+        e.preventDefault(); // Previne o ecrã de deslizar ao assinar
+        const { x, y } = getCoordinates(sigCanvasRef.current, e);
+        const ctx = sigCanvasRef.current.getContext('2d');
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        setHasSignature(true);
+      };
+
+      const stopDrawing = () => {
+        setIsDrawing(false);
+        const ctx = sigCanvasRef.current?.getContext('2d');
+        if(ctx) ctx.closePath();
+      };
+
+      const clearSignature = () => {
+        const canvas = sigCanvasRef.current;
+        if(canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          setHasSignature(false);
         }
       };
 
@@ -303,7 +372,7 @@
             const lines = doc.splitTextToSize(content, w - 4);
             const boxHeight = (lines.length * 4) + 4; // Espaçamento de linhas menor
             
-            // Segurança extrema (só cria nova página se o texto for gigante, o que foge do padrão)
+            // Segurança extrema
             if (y + boxHeight > 280) { doc.addPage(); y = m; } 
             
             doc.rect(m, y, w, boxHeight);
@@ -317,7 +386,7 @@
 
           // --- IMAGENS (LADO A LADO) ---
           if (images.length > 0) {
-            // Segurança para as imagens não quebrarem página, caso falte espaço
+            // Segurança para as imagens não quebrarem página
             if (y > 220) { doc.addPage(); y = m; }
             
             doc.setFillColor(230, 230, 230);
@@ -327,48 +396,48 @@
             doc.text("REGISTRO FOTOGRÁFICO", 105, y + 4.5, { align: "center" });
             y += 8;
 
-            const maxImgHeight = 65; // Altura máxima para não estourar a página
+            const maxImgHeight = 65; 
             const imgSpacing = 5;
             const totalSpacing = (images.length - 1) * imgSpacing;
-            const maxSlotWidth = (w - totalSpacing) / images.length; // Largura dividida igualmente (1, 2 ou 3)
+            const maxSlotWidth = (w - totalSpacing) / images.length;
             
             let currentX = m;
             let maxActualHeight = 0;
 
             images.forEach((imgData, idx) => {
               const props = doc.getImageProperties(imgData);
-              
-              // Calcula escala para caber na largura do slot E na altura máxima
               const scaleW = maxSlotWidth / props.width;
               const scaleH = maxImgHeight / props.height;
               const scale = Math.min(scaleW, scaleH);
-              
               const finalW = props.width * scale;
               const finalH = props.height * scale;
-              
-              // Centraliza a imagem no seu "slot" caso ela seja mais estreita que o espaço disponível
               const offsetX = currentX + (maxSlotWidth - finalW) / 2;
               
               doc.addImage(imgData, 'JPEG', offsetX, y, finalW, finalH);
               doc.setDrawColor(150);
-              doc.rect(offsetX, y, finalW, finalH); // Borda cinza na foto
+              doc.rect(offsetX, y, finalW, finalH);
               
-              // Legenda Anexo 1, 2, 3
               doc.setFontSize(7);
               doc.setFont("helvetica", "bold");
               doc.text(`ANEXO ${idx + 1}`, currentX + (maxSlotWidth / 2), y + finalH + 4, { align: "center" });
 
               if (finalH + 5 > maxActualHeight) maxActualHeight = finalH + 5;
-              
-              currentX += maxSlotWidth + imgSpacing; // Move X para a próxima imagem da mesma linha
+              currentX += maxSlotWidth + imgSpacing;
             });
 
             y += maxActualHeight + 10;
           }
 
-          // --- ASSINATURA (SEMPRE NO FUNDO) ---
-          if (y > 275) { doc.addPage(); y = m; } 
-          else if (y < 250) { y = 265; } // Empurra a assinatura para o fim da folha para ficar bonito
+          // --- ASSINATURA ---
+          if (y > 265) { doc.addPage(); y = m; } 
+          else if (y < 235) { y = 250; } // Empurra a assinatura para o fim
+
+          // Adicionar Assinatura Digital se houver
+          if (hasSignature && sigCanvasRef.current) {
+            const sigData = sigCanvasRef.current.toDataURL('image/png');
+            // Centraliza a assinatura acima da linha (X=75 a X=135, largura=60)
+            doc.addImage(sigData, 'PNG', 75, y - 22, 60, 22);
+          }
           
           doc.setDrawColor(0);
           doc.line(65, y, 145, y); // Linha de assinatura
@@ -452,7 +521,6 @@
                     </button>
                   </div>
                   
-                  {/* Painel de Status do PWA para Depuração */}
                   <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                     <p className="text-xs font-bold text-gray-700">Status do Aplicativo (PWA)</p>
                     <p className={`text-xs mt-1 font-semibold ${swStatus.includes('✅') ? 'text-green-600' : 'text-red-500'}`}>
@@ -549,7 +617,7 @@
               )}
 
               {step === 2 && (
-                <div className="flex flex-col gap-5 pb-20">
+                <div className="flex flex-col gap-5 pb-24">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Data do Fato</label>
@@ -563,7 +631,7 @@
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição da Ocorrência</label>
-                    <textarea name="description" value={formData.description} onChange={handleInputChange} rows="4" spellCheck={true} lang="pt-BR" className={`w-full border ${errors.description ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm`} placeholder="Descreva os detalhes..."></textarea>
+                    <textarea name="description" value={formData.description} onChange={handleInputChange} rows="3" spellCheck={true} lang="pt-BR" className={`w-full border ${errors.description ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm`} placeholder="Descreva os detalhes..."></textarea>
                   </div>
 
                   <div>
@@ -608,6 +676,38 @@
                       </div>
                     )}
                   </div>
+
+                  {/* NOVO: Campo de Assinatura Digital */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mt-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-bold text-gray-800">Assinatura Digital <span className="text-gray-500 font-normal">(Opcional)</span></label>
+                      {hasSignature && (
+                        <button onClick={clearSignature} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded">Limpar</button>
+                      )}
+                    </div>
+                    <div className="relative bg-white rounded-lg border border-gray-300 overflow-hidden" style={{ touchAction: 'none' }}>
+                      {!hasSignature && !isDrawing && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+                          <p className="text-sm font-medium text-gray-500">Assine aqui</p>
+                        </div>
+                      )}
+                      <canvas
+                        ref={sigCanvasRef}
+                        width={800}
+                        height={300}
+                        style={{ width: '100%', height: '120px' }}
+                        onMouseDown={startDrawing}
+                        onMouseMove={draw}
+                        onMouseUp={stopDrawing}
+                        onMouseLeave={stopDrawing}
+                        onTouchStart={startDrawing}
+                        onTouchMove={draw}
+                        onTouchEnd={stopDrawing}
+                        className="cursor-crosshair"
+                      />
+                    </div>
+                  </div>
+                  
                 </div>
               )}
             </div>
